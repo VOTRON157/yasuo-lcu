@@ -25,7 +25,6 @@ module.exports = class YasuoApiClient extends Routes {
                 this.pass = new Buffer.alloc(Buffer.byteLength(access_token, "utf-8"), access_token).toString("base64")
                 this.agent = axios.create({
                     baseURL: this.baseURL,
-                    timeout: 1000,
                     headers: {
                         'User-Agent': 'LeagueOfLegendsClient',
                         'Accept': 'application/json',
@@ -45,54 +44,53 @@ module.exports = class YasuoApiClient extends Routes {
         })
     }
 
-    /**
-    * Sends an HTTP request to the League of Legends LCU API.
-    * @param {string} method - The HTTP method of the request (e.g. GET, POST, PUT, DELETE).
-    * @param {string} endpoint - The endpoint of the request (e.g. /lol-summoner/v1/current-summoner).
-    * @param {Object} data - The data of the request (e.g. request body, parameters, headers).
-    * @returns {Promise} - A Promise that resolves with the result of the request or rejects with an error.
-    * @throws {Error} - If the authentication credentials have not been initialized using <APIManager>.init().
-    */
-    request(method, endpoint, data = {}) {
+    async request(method, endpoint, data = {}) {
         if (!this.baseURL || !this.pass) throw new Error("Please use <APIManager>.init() to access the credentials before making any type of HTTP request.");
-        return new Promise((resolve, reject) => {
-            data.url = endpoint;
-            data.method = method
-            this.agent(data).then(res => {
-                resolve(res)
-            }).catch(e => reject(e))
-        })
+        data.url = endpoint;
+        data.method = method
+        return (await this.agent(data))
     }
 
-    /**
-    * Changes the avatar of the current user's League of Legends account.
-    * @param {number} avatarId - The ID of the avatar to set.
-    * @returns {Promise} - A Promise that resolves with the result of the request or rejects with an error.
-    * @throws {Error} - If the authentication credentials have not been initialized using <APIManager>.init().
-    */
-    changeAvatar(avatarId) {
-        return new Promise((resolve, reject) => {
-            this.request('PUT', this.routes.changeAvatar, {
-                data: {
-                    profileIconId: avatarId
-                }
-            })
-                .then(res => resolve(res))
-                .catch(err => reject(err));
-        })
+    async changeAvatar(avatarId) {
+        return (await this.request('PUT', this.routes.changeAvatar, {
+            data: {
+                profileIconId: avatarId
+            }
+        }))
     }
 
 
-    /**
-    * Initiates the matchmaking process for a League of Legends game.
-    * @returns {Promise} - A Promise that resolves with the result of the request or rejects with an error.
-    * @throws {Error} - If the authentication credentials have not been initialized using <APIManager>.init().
-    */
-    startMatchMaking() {
-        return new Promise((resolve, reject) => {
-            this.request('POST', this.routes.matchMaking)
-                .then(res => resolve(res))
-                .catch(err => reject(err));
-        })
+    async getCurrentSummoner() {
+        return (await this.request('GET', '/lol-summoner/v1/current-summoner/')).data
+    }
+    async startMatchMaking() {
+        return (await this.request('POST', this.routes.matchMaking))
+    }
+    async currentSelection() {
+        try {
+            const res = await this.request('GET', '/lol-champ-select/v1/session')
+            return res
+        } catch {
+            return false
+        }
+    }
+
+    async autoSelectChampion(championForpickId) {
+        const select = setInterval(async () => {
+            const res = await this.currentSelection()
+            if (res) {
+                const { type, id } = res.data.actions[0].find(a => a.actorCellId === res.data.localPlayerCellId)
+                if(type !== 'pick') return clearInterval(select)
+                const { status } = await this.request('PATCH', `/lol-champ-select/v1/session/actions/${id}`, {
+                    data: {
+                        'championId': championForpickId,
+                        'completed': true,
+                    }
+                }).catch(e => {
+                    console.log(e)
+                })
+                if (status == 204) return clearInterval(select)
+            }
+        }, 1000);
     }
 }
